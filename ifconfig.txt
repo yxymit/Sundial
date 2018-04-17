@@ -1,0 +1,6 @@
+=s
+# a list of servers; each on a new line
+server1
+server2
+server3
+server4
