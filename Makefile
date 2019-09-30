@@ -7,7 +7,7 @@ SRC_DIRS = ./ ./benchmarks/ ./concurrency_control/ ./storage/ ./system/ ./transp
 INCLUDE = -I. -I./benchmarks -I./concurrency_control -I./storage -I./system -I./transport -I./utils
 
 CFLAGS += $(INCLUDE) -D NOGRAPHITE=1 -Werror -O3 -g -ggdb
-LDFLAGS = -Wall -L./libs -L./nanomsg/lib/ -pthread -lrt -std=c++0x -O3 -ljemalloc 
+LDFLAGS = -Wall -L./libs -pthread -lrt -std=c++0x -O3 -ljemalloc
 LDFLAGS += $(CFLAGS)
 
 CPPS = $(foreach dir, $(SRC_DIRS), $(wildcard $(dir)*.cpp))

@@ -50,7 +50,7 @@ LockfreeQueue::dequeue(uintptr_t & value)
             success = ATOM_CAS(_tail, old_tail, old_tail->next);
         else if (old_tail == old_head) {
             success = ATOM_CAS(_head, old_tail, NULL);
-            if (success) 
+            if (success)
                 ATOM_CAS(_tail, old_tail, NULL);
         }
         if (!success)
@@ -59,4 +59,4 @@ LockfreeQueue::dequeue(uintptr_t & value)
     value = old_tail->value;
     free(old_tail);
     return true;
-} 
+}
