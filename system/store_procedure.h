@@ -1,6 +1,5 @@
 #pragma once
 #include "global.h"
-#include "packetize.h"
 
 class QueryBase;
 class CCManager;
@@ -12,7 +11,7 @@ public:
     StoreProcedure(TxnManager * txn_man, QueryBase * query)
         : _query(query)
         , _txn(txn_man)
-        , _is_single_partition(true)
+        //, _is_single_partition(true)
     {
         init();
     }
@@ -25,7 +24,7 @@ public:
 
     virtual RC execute() = 0;
 
-    RC process_remote_req(uint32_t size, char * data, uint32_t &resp_size, char * &resp_data);
+    //RC process_remote_req(uint32_t size, char * data, uint32_t &resp_size, char * &resp_data);
 
     virtual void txn_abort();
     // for a sub transaction
@@ -33,8 +32,8 @@ public:
 
     access_t _local_miss_type;
     uint64_t _local_miss_key;
-    map<uint32_t, UnstructuredBuffer> remote_requests;
-    bool is_single_partition() { return _is_single_partition; }
+    //map<uint32_t, UnstructuredBuffer> remote_requests;
+    //bool is_single_partition() { return _is_single_partition; }
 protected:
 #define LOAD_VALUE(type, var, schema, data, col) \
     type var = *(type *)row_t::get_value(schema, col, data);
@@ -44,16 +43,17 @@ protected:
 #define GET_DATA(key, index, type) {{ \
     set<row_t *> * rows = NULL; \
     rc = get_cc_manager()->index_read(index, key, rows, 1); \
+    assert(rc == RCOK || rc == ABORT); \
     if (rc != RCOK) return rc; \
     assert(!rows->empty()); \
     _curr_row = *rows->begin(); \
     rc = get_cc_manager()->get_row(_curr_row, type, _curr_data, key);\
+    assert(rc == RCOK || rc == ABORT); \
     if (rc != RCOK) return rc; }}
 
 
 #define REMOTE_ACCESS(node_id, key, type, table, index) {\
     if (node_id != g_node_id) { \
-        _is_single_partition = false; \
         uint32_t cc_specific_msg_size = 0; \
         char * cc_specific_msg_data = NULL; \
         RC rc = get_cc_manager()->register_remote_access(node_id, type, key, table, \
@@ -80,7 +80,7 @@ protected:
 
     bool              _self_abort;
 
-    bool              _is_single_partition;
+    //bool              _is_single_partition;
     // [For distributed DBMS]
     uint32_t          _phase;
     bool              _waiting_for_index;

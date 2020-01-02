@@ -2,7 +2,7 @@
 #include "global.h"
 #include "helper.h"
 #include "workload.h"
-#include "server_thread.h"
+#include "worker_thread.h"
 #include "table.h"
 #include "row.h"
 #include "index_hash.h"
@@ -23,21 +23,16 @@ int WorkloadYCSB::next_tid;
 RC WorkloadYCSB::init() {
     workload::init();
     next_tid = 0;
-    char * cpath = getenv("GRAPHITE_HOME");
-    string path;
-    if (cpath == NULL)
-        path = "./benchmarks/YCSB_schema.txt";
-    else {
-        path = string(cpath);
-        path += "/tests/apps/dbms/YCSB_schema.txt";
-    }
-    init_schema( path );
+    //std::ifstream in ("./benchmarks/YCSB_schema.txt");
+    std::istringstream in (YCSB_schema_string);
+    init_schema( in );
     init_table_parallel();
     return RCOK;
 }
 
-RC WorkloadYCSB::init_schema(string schema_file) {
-    workload::init_schema(schema_file);
+RC WorkloadYCSB::init_schema(std::istream &in) {
+
+    workload::init_schema(in);
     the_table = tables[0];
     the_index = indexes[0];
     return RCOK;
@@ -57,7 +52,7 @@ WorkloadYCSB::key_to_node(uint64_t key, uint32_t table_id)
 // init table in parallel
 void WorkloadYCSB::init_table_parallel() {
     enable_thread_mem_pool = true;
-    pthread_t p_thds[g_init_parallelism - 1];
+    pthread_t * p_thds = new pthread_t [g_init_parallelism - 1];
     for (uint32_t i = 0; i < g_init_parallelism - 1; i++)
         pthread_create(&p_thds[i], NULL, threadInitTable, this);
     threadInitTable(this);
@@ -69,6 +64,7 @@ void WorkloadYCSB::init_table_parallel() {
             exit(-1);
         }
     }
+    delete [] p_thds;
     enable_thread_mem_pool = false;
 }
 
@@ -88,7 +84,7 @@ void * WorkloadYCSB::init_table_slice() {
         rc = the_table->get_new_row(new_row, part_id);
         assert(rc == RCOK);
         // LSBs of a key indicate the node ID
-        uint64_t primary_key = key * g_num_server_nodes + g_node_id;
+        uint64_t primary_key = key * g_num_nodes + g_node_id;
         new_row->set_value(0, &primary_key);
         Catalog * schema = the_table->get_schema();
 
@@ -115,8 +111,7 @@ WorkloadYCSB::create_store_procedure(TxnManager * txn, QueryBase * query)
 QueryBase *
 WorkloadYCSB::gen_query()
 {
-    QueryBase * query = (QueryYCSB *) MALLOC(sizeof(QueryYCSB));
-    new(query) QueryYCSB();
+    QueryBase * query = new QueryYCSB;
     return query;
 }
 
@@ -150,5 +145,23 @@ WorkloadYCSB::get_primary_key(row_t * row)
     row->get_value(0, &key);
     return key;
 }
+
+std::string YCSB_schema_string =
+"//size, type, name\n"
+"TABLE=MAIN_TABLE\n"
+"    8,int64_t,KEY\n"
+"    100,string,F0\n"
+"    100,string,F1\n"
+"    100,string,F2\n"
+"    100,string,F3\n"
+"    100,string,F4\n"
+"    100,string,F5\n"
+"    100,string,F6\n"
+"    100,string,F7\n"
+"    100,string,F8\n"
+"    100,string,F9\n"
+"\n"
+"INDEX=MAIN_INDEX\n"
+"MAIN_TABLE,0";
 
 #endif

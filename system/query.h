@@ -22,8 +22,8 @@ public:
     QueryBase() { _isolation_level = SR; }
     virtual ~QueryBase() {}
 
-    virtual void gen_requests() { assert(false); };
-    virtual uint32_t serialize(char * &raw_data) { assert(false); }
+    virtual void gen_requests() { assert(false); }
+    virtual uint32_t serialize(char * &raw_data) { assert(false); return 0; }
 
     Isolation     get_isolation_level() { return _isolation_level; }
     virtual bool        is_all_remote_readonly() { return false; }

@@ -8,7 +8,6 @@
 #include "workload.h"
 #include "index_base.h"
 #include "tictoc_manager.h"
-#include "packetize.h"
 
 StoreProcedure::~StoreProcedure()
 {
@@ -22,7 +21,7 @@ StoreProcedure::init() {
     _curr_row = NULL;
     _curr_query_id = 0;
     _curr_offset = 0;
-    remote_requests.clear();
+    //remote_requests.clear();
 }
 
 void
@@ -48,9 +47,10 @@ StoreProcedure::txn_abort()
     _curr_row = NULL;
     _curr_query_id = 0;
     _curr_offset = 0;
-    remote_requests.clear();
+    //remote_requests.clear();
 }
 
+/*
 RC
 StoreProcedure::process_remote_req(uint32_t size, char * data, uint32_t &resp_size, char * &resp_data)
 {
@@ -88,4 +88,4 @@ StoreProcedure::process_remote_req(uint32_t size, char * data, uint32_t &resp_si
     get_cc_manager()->get_resp_data(resp_size, resp_data);
     assert(resp_size > 0);
     return RCOK;
-}
+}*/

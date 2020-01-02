@@ -90,7 +90,7 @@ QueryNewOrderTPCC::QueryNewOrderTPCC()
     uint32_t rbk = URand(1, 100);
     ol_cnt = URand(5, 15);
     o_entry_d = 2013;
-    items = (Item_no *) _mm_malloc(sizeof(Item_no) * ol_cnt, 64);
+    items = new Item_no[ol_cnt];
     remote = false;
 
     for (uint32_t oid = 0; oid < ol_cnt; oid ++) {
@@ -119,11 +119,6 @@ QueryNewOrderTPCC::QueryNewOrderTPCC()
             }
         }
     }
-#if DEBUG_ASSERT
-    for (uint32_t i = 0; i < ol_cnt; i ++)
-        for (uint32_t j = 0; j < i; j++)
-            assert(items[i].ol_i_id != items[j].ol_i_id);
-#endif
 }
 
 QueryNewOrderTPCC::QueryNewOrderTPCC(char * data)
@@ -137,19 +132,21 @@ QueryNewOrderTPCC::QueryNewOrderTPCC(char * data)
 QueryNewOrderTPCC::~QueryNewOrderTPCC()
 {
     assert(items);
-    delete items;
+    delete [] items;
 }
 
 uint32_t
 QueryNewOrderTPCC::serialize(char * &raw_data)
 {
-    uint32_t size = sizeof(*this);
-    size += sizeof(Item_no);
+    assert(false);
+    return 0;
+    //uint32_t size = sizeof(*this);
+    //size += sizeof(Item_no);
 
-    raw_data = (char *) MALLOC(size);
-    memcpy(raw_data, this, sizeof(*this));
-    memcpy(raw_data + sizeof(*this), items, sizeof(Item_no));
-    return size;
+    //raw_data = new char[size];
+    //memcpy(raw_data, this, sizeof(*this));
+    //memcpy(raw_data + sizeof(*this), items, sizeof(Item_no));
+    //`return size;
 }
 
 ///////////////////////////////////////////

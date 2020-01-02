@@ -2,7 +2,7 @@
 #include "helper.h"
 #include "tpcc.h"
 #include "workload.h"
-#include "server_thread.h"
+#include "worker_thread.h"
 #include "table.h"
 #include "index_hash.h"
 #include "index_btree.h"
@@ -19,14 +19,13 @@
 
 RC WorkloadTPCC::init() {
     workload::init();
-    string path = "./benchmarks/";
 #if TPCC_SMALL
-    path += "TPCC_short_schema.txt";
+//  std::ifstream in ("./benchmarks/TPCC_short_schema.txt");
 #else
-    path += "TPCC_full_schema.txt";
+//  std::ifstream in ("./benchmarks/TPCC_full_schema.txt");
+    std::istringstream in (TPCC_schema_string);
 #endif
-    cout << "reading schema file: " << path << endl;
-    init_schema( path.c_str() );
+    init_schema( in );
     cout << "TPCC schema initialized" << endl;
     next_tid = 0;
     init_table();
@@ -34,8 +33,8 @@ RC WorkloadTPCC::init() {
     return RCOK;
 }
 
-RC WorkloadTPCC::init_schema(const char * schema_file) {
-    workload::init_schema(schema_file);
+RC WorkloadTPCC::init_schema(std::istream &in) {
+    workload::init_schema(in);
 
     t_warehouse = tables[TAB_WAREHOUSE];
     t_district = tables[TAB_DISTRICT];
@@ -131,6 +130,7 @@ uint32_t
 WorkloadTPCC::key_to_node(uint64_t key, uint32_t table_id)
 {
     assert(false);
+    return 0;
     switch(table_id) {
         case TAB_WAREHOUSE:
             return TPCCHelper::wh_to_node( key );
@@ -168,10 +168,6 @@ RC WorkloadTPCC::init_table() {
 
 void WorkloadTPCC::init_tab_item() {
     for (uint64_t i = 1; i <= g_max_items; i++) {
-#if !REPLICATE_ITEM_TABLE
-        if (i % g_num_server_nodes != g_node_id)
-            continue;
-#endif
         row_t * row;
         t_item->get_new_row(row, 0);
         row->set_value(I_ID, &i);
@@ -376,7 +372,7 @@ void WorkloadTPCC::init_tab_hist(uint64_t c_id, uint64_t d_id, uint64_t w_id) {
 }
 
 void WorkloadTPCC::init_tab_order(uint64_t did, uint64_t wid) {
-    uint64_t perm[g_cust_per_dist];
+    uint64_t * perm = new uint64_t[g_cust_per_dist];
     init_permutation(perm, wid); /* initialize permutation of customer numbers */
     for (uint64_t oid = 1; oid <= g_cust_per_dist; oid++) {
         row_t * row;
@@ -446,6 +442,7 @@ void WorkloadTPCC::init_tab_order(uint64_t did, uint64_t wid) {
             index_insert(i_neworder, key, row);
         }
     }
+    delete[] perm;
 }
 
 /*==================================================================+
@@ -513,8 +510,10 @@ WorkloadTPCC::deserialize_subquery(char * data)
     } else if (q->type == TPCC_PAYMENT) {
         QueryPaymentTPCC * query = new QueryPaymentTPCC(data);
         return query;
-    } else
+    } else {
         assert(false);
+        return NULL;
+    }
 }
 
 QueryBase *
@@ -559,6 +558,7 @@ WorkloadTPCC::clone_query(QueryBase * query)
             return new QueryStockLevelTPCC((QueryStockLevelTPCC *)query);
         default:
             assert(false);
+            return NULL;
     }
 }
 
@@ -585,6 +585,7 @@ WorkloadTPCC::get_primary_key(row_t * row)
         }
         case TAB_HISTORY: {
             assert(false);
+            return -1;
         }
         case TAB_NEWORDER: {
             row->get_value(NO_O_ID, &oid);
@@ -616,6 +617,7 @@ WorkloadTPCC::get_primary_key(row_t * row)
         }
         default:
             assert(false);
+            return -1;
     }
 }
 
@@ -653,6 +655,150 @@ WorkloadTPCC::get_index_key(row_t * row, uint32_t index_id)
             return orderlineKey(wid, did, oid);
         default:
             assert(false);
+            return 0;
     }
 }
+
+std::string TPCC_schema_string =
+"//size,type,name\n"
+"TABLE=WAREHOUSE\n"
+"   8,int64_t,W_ID\n"
+"   10,string,W_NAME\n"
+"   20,string,W_STREET_1\n"
+"   20,string,W_STREET_2\n"
+"   20,string,W_CITY\n"
+"   2,string,W_STATE\n"
+"   9,string,W_ZIP\n"
+"   8,double,W_TAX\n"
+"   8,double,W_YTD\n"
+"\n"
+"TABLE=DISTRICT\n"
+"   8,int64_t,D_ID\n"
+"   8,int64_t,D_W_ID\n"
+"   10,string,D_NAME\n"
+"   20,string,D_STREET_1\n"
+"   20,string,D_STREET_2\n"
+"   20,string,D_CITY\n"
+"   2,string,D_STATE\n"
+"   9,string,D_ZIP\n"
+"   8,double,D_TAX\n"
+"   8,double,D_YTD\n"
+"   8,int64_t,D_NEXT_O_ID\n"
+"\n"
+"TABLE=CUSTOMER\n"
+"   8,int64_t,C_ID\n"
+"   8,int64_t,C_D_ID\n"
+"   8,int64_t,C_W_ID\n"
+"   16,string,C_FIRST\n"
+"   2,string,C_MIDDLE\n"
+"   16,string,C_LAST\n"
+"   20,string,C_STREET_1\n"
+"   20,string,C_STREET_2\n"
+"   20,string,C_CITY\n"
+"   2,string,C_STATE\n"
+"   9,string,C_ZIP\n"
+"   16,string,C_PHONE\n"
+"   8,int64_t,C_SINCE\n"
+"   2,string,C_CREDIT\n"
+"   8,int64_t,C_CREDIT_LIM\n"
+"   8,int64_t,C_DISCOUNT\n"
+"   8,double,C_BALANCE\n"
+"   8,double,C_YTD_PAYMENT\n"
+"   8,uint64_t,C_PAYMENT_CNT\n"
+"   8,uint64_t,C_DELIVERY_CNT\n"
+"   500,string,C_DATA\n"
+"\n"
+"TABLE=HISTORY\n"
+"   8,int64_t,H_C_ID\n"
+"   8,int64_t,H_C_D_ID\n"
+"   8,int64_t,H_C_W_ID\n"
+"   8,int64_t,H_D_ID\n"
+"   8,int64_t,H_W_ID\n"
+"   8,int64_t,H_DATE\n"
+"   8,double,H_AMOUNT\n"
+"   24,string,H_DATA\n"
+"\n"
+"TABLE=NEW-ORDER\n"
+"   8,int64_t,NO_O_ID\n"
+"   8,int64_t,NO_D_ID\n"
+"   8,int64_t,NO_W_ID\n"
+"\n"
+"TABLE=ORDER\n"
+"   8,int64_t,O_ID\n"
+"   8,int64_t,O_C_ID\n"
+"   8,int64_t,O_D_ID\n"
+"   8,int64_t,O_W_ID\n"
+"   8,int64_t,O_ENTRY_D\n"
+"   8,int64_t,O_CARRIER_ID\n"
+"   8,int64_t,O_OL_CNT\n"
+"   8,int64_t,O_ALL_LOCAL\n"
+"\n"
+"TABLE=ORDER-LINE\n"
+"   8,int64_t,OL_O_ID\n"
+"   8,int64_t,OL_D_ID\n"
+"   8,int64_t,OL_W_ID\n"
+"   8,int64_t,OL_NUMBER\n"
+"   8,int64_t,OL_I_ID\n"
+"   8,int64_t,OL_SUPPLY_W_ID\n"
+"   8,int64_t,OL_DELIVERY_D\n"
+"   8,int64_t,OL_QUANTITY\n"
+"   8,double,OL_AMOUNT\n"
+"   8,int64_t,OL_DIST_INFO\n"
+"\n"
+"TABLE=ITEM\n"
+"   8,int64_t,I_ID\n"
+"   8,int64_t,I_IM_ID\n"
+"   24,string,I_NAME\n"
+"   8,int64_t,I_PRICE\n"
+"   50,string,I_DATA\n"
+"\n"
+"TABLE=STOCK\n"
+"   8,int64_t,S_I_ID\n"
+"   8,int64_t,S_W_ID\n"
+"   8,int64_t,S_QUANTITY\n"
+"   24,string,S_DIST_01\n"
+"   24,string,S_DIST_02\n"
+"   24,string,S_DIST_03\n"
+"   24,string,S_DIST_04\n"
+"   24,string,S_DIST_05\n"
+"   24,string,S_DIST_06\n"
+"   24,string,S_DIST_07\n"
+"   24,string,S_DIST_08\n"
+"   24,string,S_DIST_09\n"
+"   24,string,S_DIST_10\n"
+"   8,int64_t,S_YTD\n"
+"   8,int64_t,S_ORDER_CNT\n"
+"   8,int64_t,S_REMOTE_CNT\n"
+"   50,string,S_DATA\n"
+"\n"
+"INDEX=IDX_ITEM\n"
+"ITEM,400000\n"
+"\n"
+"INDEX=IDX_WAREHOUSE\n"
+"WAREHOUSE,100\n"
+"\n"
+"INDEX=IDX_DISTRICT\n"
+"DISTRICT,1000\n"
+"\n"
+"INDEX=IDX_CUSTOMER_ID\n"
+"CUSTOMER,120000\n"
+"\n"
+"INDEX=IDX_CUSTOMER_LAST\n"
+"CUSTOMER,120000\n"
+"\n"
+"INDEX=IDX_STOCK\n"
+"STOCK,400000\n"
+"\n"
+"INDEX=IDX_ORDER\n"
+"ORDER,240000\n"
+"\n"
+"INDEX=IDX_ORDER_CUST\n"
+"ORDER,240000\n"
+"\n"
+"INDEX=IDX_ORDERLINE\n"
+"ORDERLINE,240000\n"
+"\n"
+"INDEX=IDX_NEWORDER\n"
+"NEWORDER,120000";
+
 #endif

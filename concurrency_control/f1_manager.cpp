@@ -4,7 +4,6 @@
 #include "txn.h"
 #include "manager.h"
 #include "table.h"
-#include "packetize.h"
 #include "query.h"
 #include "workload.h"
 #include "index_base.h"

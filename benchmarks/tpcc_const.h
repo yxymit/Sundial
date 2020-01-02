@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 enum {
     TAB_WAREHOUSE,
     TAB_DISTRICT,

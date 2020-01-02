@@ -31,9 +31,6 @@ class TPCCHelper {
 public:
     static uint32_t wh_to_node(uint32_t wh_id);
     static const char * get_txn_name(uint32_t txn_type_id);
-#if !REPLICATE_ITEM_TABLE
-    static uint32_t item_to_node(uint32_t item_id);
-#endif
 };
 
 #endif

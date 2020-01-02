@@ -39,21 +39,21 @@ public:
     void add_col(char * col_name, uint64_t size, char * type);
 
     uint32_t        field_cnt;
-     const char *     table_name;
+     const char *   table_name;
 
-    uint32_t         get_tuple_size() { return tuple_size; };
+    uint32_t        get_tuple_size() { return tuple_size; };
 
-    uint64_t         get_field_cnt() { return field_cnt; };
-    uint64_t         get_field_size(int id) { return _columns[id].size; };
-    uint64_t         get_field_index(int id) { return _columns[id].index; };
-    char *             get_field_type(uint64_t id);
-    char *             get_field_name(uint64_t id);
-    uint64_t         get_field_id(const char * name);
-    char *             get_field_type(char * name);
-    uint64_t         get_field_index(char * name);
+    uint64_t        get_field_cnt() { return field_cnt; };
+    uint64_t        get_field_size(int id) { return _columns[id].size; };
+    uint64_t        get_field_index(int id) { return _columns[id].index; };
+    char *          get_field_type(uint64_t id);
+    char *          get_field_name(uint64_t id);
+    uint64_t        get_field_id(const char * name);
+    char *          get_field_type(char * name);
+    uint64_t        get_field_index(char * name);
 
-    void             print_schema();
-    Column *         _columns;
-    uint32_t             tuple_size;
+    void            print_schema();
+    Column *        _columns;
+    uint32_t        tuple_size;
 };
 

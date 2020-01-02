@@ -84,7 +84,8 @@ QueryYCSB::~QueryYCSB()
 
 void QueryYCSB::gen_requests() {
     _request_cnt = 0;
-    uint64_t all_keys[g_req_per_query];
+    M_ASSERT(g_req_per_query <= 64, "Change the following constant if g_req_per_query < 64");
+    uint64_t all_keys[64];
     bool has_remote = false;
     _is_all_remote_readonly = true;
     uint64_t table_size = g_synth_table_size;
@@ -105,7 +106,7 @@ void QueryYCSB::gen_requests() {
         #else
         uint64_t row_id = zipf(table_size - 1, g_zipf_theta);
         #endif
-        uint64_t primary_key = row_id * g_num_server_nodes + node_id;
+        uint64_t primary_key = row_id * g_num_nodes + node_id;
         M_ASSERT(row_id < table_size, "row_id=%ld\n", row_id);
         bool readonly = (row_id == 0)? false :
                         (int(row_id * g_readonly_perc) > int((row_id - 1) * g_readonly_perc));
@@ -134,7 +135,7 @@ void QueryYCSB::gen_requests() {
                 if(!readonly) break;
                 else { assert(false); row_id ++; } // avoid the read-only area
             }
-            primary_key = row_id * g_num_server_nodes + node_id;
+            primary_key = row_id * g_num_nodes + node_id;
         }
         #endif
 
@@ -151,7 +152,7 @@ void QueryYCSB::gen_requests() {
     if (!has_remote)
         _is_all_remote_readonly = false;
     // Sort the requests in key order.
-    if (g_key_order) {
+    if (g_sort_key_order) {
         for (int i = _request_cnt - 1; i > 0; i--)
             for (int j = 0; j < i; j ++)
                 if (_requests[j].key > _requests[j + 1].key) {
@@ -159,7 +160,7 @@ void QueryYCSB::gen_requests() {
                     _requests[j] = _requests[j + 1];
                     _requests[j + 1] = tmp;
                 }
-        for (UInt32 i = 0; i < _request_cnt - 1; i++)
+        for (uint32_t i = 0; i < _request_cnt - 1; i++)
             assert(_requests[i].key < _requests[i + 1].key);
     }
 }
@@ -167,10 +168,12 @@ void QueryYCSB::gen_requests() {
 uint32_t
 QueryYCSB::serialize(char * &raw_data)
 {
-    uint32_t size = sizeof(*this);
-    size += _request_cnt * sizeof(RequestYCSB);
-    raw_data = (char *) MALLOC(size);
-    memcpy(raw_data, this, sizeof(*this));
-    memcpy(raw_data + sizeof(*this), _requests, _request_cnt * sizeof(RequestYCSB));
-    return size;
+    assert(false);
+    return 0;
+    //uint32_t size = sizeof(*this);
+    //size += _request_cnt * sizeof(RequestYCSB);
+    //raw_data = (char *) MALLOC(size);
+    //memcpy(raw_data, this, sizeof(*this));
+    //memcpy(raw_data + sizeof(*this), _requests, _request_cnt * sizeof(RequestYCSB));
+    //return size;
 }

@@ -4,11 +4,7 @@
 #include "row.h"
 #include "row_lock.h"
 #include "row_tictoc.h"
-#include "row_naive_tictoc.h"
 #include "row_f1.h"
-#include "row_maat.h"
-#include "row_ideal_mvcc.h"
-#include "row_tcm.h"
 #include "manager.h"
 
 IndexHash::IndexHash(bool is_key_index)
@@ -98,7 +94,7 @@ IndexHash::Bucket::unlatch() {
 ROW_MAN *
 IndexHash::Bucket::get_manager(uint64_t key)
 {
-    latch();
+    _manager->latch();
     return _manager;
 }
 

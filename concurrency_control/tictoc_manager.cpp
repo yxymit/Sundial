@@ -10,9 +10,6 @@
 #include "table.h"
 #include "store_procedure.h"
 #include "catalog.h"
-#include "packetize.h"
-#include "message.h"
-#include "packetize.h"
 #include "caching.h"
 #include "query.h"
 #if CC_ALG == TICTOC

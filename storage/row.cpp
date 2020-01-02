@@ -7,10 +7,6 @@
 #include "row_lock.h"
 #include "row_f1.h"
 #include "row_tictoc.h"
-#include "row_naive_tictoc.h"
-#include "row_maat.h"
-#include "row_ideal_mvcc.h"
-#include "row_tcm.h"
 #include "manager.h"
 #include "workload.h"
 #include "index_hash.h"
@@ -27,7 +23,7 @@ row_t::row_t(table_t * table)
 row_t::~row_t()
 {
     if (data)
-        delete data;
+        delete [] data;
     if (manager)
         delete manager;
 }
@@ -67,9 +63,14 @@ Catalog * row_t::get_schema() {
     return get_table()->get_schema();
 }
 
+const uint64_t row_t::get_table_id() {
+    return get_table()->get_table_id();
+}
+
 const char * row_t::get_table_name() {
     return get_table()->get_table_name();
-};
+}
+
 uint64_t row_t::get_tuple_size() {
     return get_schema()->get_tuple_size();
 }

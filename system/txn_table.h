@@ -6,6 +6,7 @@
 
 class TxnManager;
 
+// States of all active transactions are maintained in the per-node TxnTable.
 class TxnTable
 {
 public:
@@ -31,5 +32,4 @@ private:
 
     Bucket ** _buckets;
     uint32_t _txn_table_size;
-    hash<uint64_t> _Hash;
 };

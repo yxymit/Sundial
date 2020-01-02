@@ -5,13 +5,12 @@
 
 void print_usage() {
     printf("[usage]:\n");
-    printf("\t-SINT       ; NUM_SERVER_THREADS\n");
-    printf("\t-dINT       ; PRT_LAT_DISTR\n");
+
+    printf("\t-SINT       ; NUM_WORKER_THREADS\n");
     printf("\t-mINT       ; MULTI_VERSION (if turned on)\n");
     printf("\t-GaINT      ; ABORT_PENALTY (in us)\n");
     printf("\t-GtINT      ; TS_ALLOC\n");
-    printf("\t-GkINT      ; KEY_ORDER\n");
-    printf("\t-GWFLOAT    ; WARMUP_TIME\n");
+    printf("\t-GkINT      ; SORT_KEY_ORDER\n");
     printf("\t-GTFLOAT    ; RUN_TIME\n");
     printf("\t-GbINT      ; TS_BATCH_ALLOC\n");
     printf("\t-GuINT      ; TS_BATCH_NUM\n");
@@ -33,8 +32,6 @@ void print_usage() {
     printf("\t-TnFLOAT    ; PERC_NEWORDER\n");
     printf("\t-TsFLOAT    ; PERC_ORDERSTATUS\n");
     printf("\t-TdFLOAT    ; PERC_DELIVERY\n");
-    printf("[TATP]:\n");
-    printf("\t-AsINT      ; TATP_POPULATION\n");
     printf("Concurrency Control Algorithms\n");
     printf("[TICTOC]:\n");
     printf("\t-CwINT      ; MAX_NUM_WAITS\n");
@@ -48,6 +45,11 @@ void print_usage() {
 }
 
 void parser(int argc, char * argv[]) {
+    if (CONTROLLED_LOCK_VIOLATION) static_assert(LOG_ENABLE);
+    //if (DISTRIBUTED) assert(NUM_NODES > 1);
+    M_ASSERT(INDEX_STRUCT != IDX_BTREE, "btree is not supported yet\n");
+    // The current admission control is designed for logging
+    if (ENABLE_ADMISSION_CONTROL) static_assert( LOG_ENABLE );
     for (int i = 1; i < argc; i++) {
         assert(argv[i][0] == '-');
         if (argv[i][1] == 'm')
@@ -60,10 +62,8 @@ void parser(int argc, char * argv[]) {
             g_read_perc = atof( &argv[i][2] );
         else if (argv[i][1] == 'z')
             g_zipf_theta = atof( &argv[i][2] );
-        else if (argv[i][1] == 'd')
-            g_prt_lat_distr = atoi( &argv[i][2] );
         else if (argv[i][1] == 'S')
-            g_num_server_threads = atoi( &argv[i][2] );
+            g_num_worker_threads = atoi( &argv[i][2] );
         else if (argv[i][1] == 's')
             g_synth_table_size = atoi( &argv[i][2] );
         else if (argv[i][1] == 'R')
@@ -77,19 +77,17 @@ void parser(int argc, char * argv[]) {
             else if (argv[i][2] == 't')
                 g_ts_alloc = atoi( &argv[i][3] );
             else if (argv[i][2] == 'k')
-                g_key_order = atoi( &argv[i][3] );
+                g_sort_key_order = atoi( &argv[i][3] );
             else if (argv[i][2] == 'b')
                 g_ts_batch_alloc = atoi( &argv[i][3] );
             else if (argv[i][2] == 'u')
                 g_ts_batch_num = atoi( &argv[i][3] );
             else if (argv[i][2] == 's')
                 g_max_clock_skew = atoi( &argv[i][3] );
-            else if (argv[i][2] == 'W')
-                g_warmup_time = atof( &argv[i][3] );
             else if (argv[i][2] == 'T')
                 g_run_time = atof( &argv[i][3] );
             else
-                assert(false);
+                exit(0);
         } else if (argv[i][1] == 'Y') {
             if (argv[i][2] == 'r')
                 g_perc_remote = atof( &argv[i][3] );
@@ -110,12 +108,7 @@ void parser(int argc, char * argv[]) {
             else if (argv[i][2] == 'd')
                 g_perc_delivery = atof( &argv[i][3] );
             else
-                assert(false);
-        } else if (argv[i][1] == 'A') {
-            // TATP
-            if (argv[i][2] == 's')
-                g_tatp_population = atoi( &argv[i][3] );
-            else assert(false);
+                exit(0);
         } else if (argv[i][1] == 'C') {
             // TICTOC
             if (argv[i][2] == 'w')
@@ -133,7 +126,8 @@ void parser(int argc, char * argv[]) {
                 strcpy( ifconfig_file, argv[++i]);
             else if (argv[i][2] == 'c')
                 g_local_cache_size = atoi( &argv[i][3] );
-            else assert(false);
+            else
+              exit(0);
         } else if (argv[i][1] == 'o') {
             i++;
             output_file = argv[i];
@@ -142,8 +136,10 @@ void parser(int argc, char * argv[]) {
             exit(0);
         }
         else
-            assert(false);
+            exit(0);
     }
-    if (g_num_server_threads < g_init_parallelism)
-        g_init_parallelism = g_num_server_threads;
+    if (g_num_worker_threads < g_init_parallelism)
+        g_init_parallelism = g_num_worker_threads;
+    if (ENABLE_ADMISSION_CONTROL)
+        assert( g_max_num_active_txns <= g_num_worker_threads );
 }

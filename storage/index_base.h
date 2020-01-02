@@ -27,17 +27,14 @@ class IndexBase {
 public:
     IndexBase() {};
     IndexBase(bool is_key_index) {};
+    virtual ~IndexBase() {}
 
-    ROW_MAN *             find_node(uint64_t key) { assert(false); }
-
-    virtual RC             init() { return RCOK; };
-    virtual RC             init(uint64_t size) { return RCOK; };
-
+    ROW_MAN *           find_node(uint64_t key) { assert(false); return NULL; }
     uint32_t            get_index_id() { return _index_id; }
-    void                 set_index_id(uint32_t index_id) { _index_id = index_id; }
+    void                set_index_id(uint32_t index_id) { _index_id = index_id; }
 
     // the index in on "table". The key is the merged key of "fields"
-    table_t *             table;
+    table_t *           table;
 
     bool                is_key_index() { return _is_key_index; }
 private:

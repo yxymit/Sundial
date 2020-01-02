@@ -3,10 +3,6 @@
 #include "lock_manager.h"
 #include "f1_manager.h"
 #include "tictoc_manager.h"
-#include "naive_tictoc_manager.h"
-#include "maat_manager.h"
-#include "ideal_mvcc_manager.h"
-#include "tcm_manager.h"
 #include "index_btree.h"
 #include "index_hash.h"
 #include "manager.h"
@@ -34,7 +30,7 @@ CCManager::init()
     _restart = false;
     _deletes.clear();
     _inserts.clear();
-    _remote_node_info.clear();
+    //_remote_node_info.clear();
 }
 
 StoreProcedure *
@@ -79,29 +75,6 @@ CCManager::row_delete(row_t * row)
             rc = WAIT;
     }
     return rc;
-}
-
-void
-CCManager::add_remote_node_info(uint32_t node_id, bool is_write)
-{
-    if (_remote_node_info.find(node_id) == _remote_node_info.end()) {
-        RemoteNodeInfo info;
-        info.node_id = node_id;
-        _remote_node_info.insert(pair<uint32_t, RemoteNodeInfo>(node_id, info));
-    }
-    _remote_node_info[node_id].has_write |= is_write;
-}
-
-void
-CCManager::get_remote_nodes_with_writes(set<uint32_t> * nodes)
-{
-    assert(nodes->empty());
-    for (map<uint32_t, RemoteNodeInfo>::iterator it = _remote_node_info.begin();
-        it != _remote_node_info.end(); it ++)
-    {
-        if (it->second.has_write)
-            nodes->insert(it->first);
-    }
 }
 
 RC

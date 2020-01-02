@@ -21,7 +21,7 @@ void Catalog::add_col(char * col_name, uint64_t size, char * type) {
 }
 
 uint64_t Catalog::get_field_id(const char * name) {
-    UInt32 i;
+    uint32_t i;
     for (i = 0; i < field_cnt; i++) {
         if (strcmp(name, _columns[i].name) == 0)
             break;
@@ -49,7 +49,7 @@ uint64_t Catalog::get_field_index(char * name) {
 
 void Catalog::print_schema() {
     printf("\n[Catalog] %s\n", table_name);
-    for (UInt32 i = 0; i < field_cnt; i++) {
+    for (uint32_t i = 0; i < field_cnt; i++) {
         printf("\t%s\t%s\t%ld\n", get_field_name(i),
             get_field_type(i), get_field_size(i));
     }

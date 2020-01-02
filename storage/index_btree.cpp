@@ -203,9 +203,6 @@ RC index_btree::start_new_tree(glob_param params, uint64_t key, itemid_t * item)
 }
 
 bool index_btree::latch_node(bt_node * node, latch_t latch_type) {
-    // TODO latch is disabled
-    if (!ENABLE_LATCH)
-        return true;
     bool success = false;
         while ( !ATOM_CAS(node->latch, false, true) ) {}
 
@@ -227,8 +224,6 @@ bool index_btree::latch_node(bt_node * node, latch_t latch_type) {
 }
 
 latch_t index_btree::release_latch(bt_node * node) {
-    if (!ENABLE_LATCH)
-        return LATCH_SH;
     latch_t type = node->latch_type;
     while ( !ATOM_CAS(node->latch, false, true) ) {}
     M_ASSERT((node->latch_type != LATCH_NONE), "release latch fault");
@@ -245,8 +240,6 @@ latch_t index_btree::release_latch(bt_node * node) {
 }
 
 RC index_btree::upgrade_latch(bt_node * node) {
-    if (!ENABLE_LATCH)
-        return RCOK;
     bool success = false;
     while ( !ATOM_CAS(node->latch, false, true) ) {}
     M_ASSERT( (node->latch_type == LATCH_SH), "Error" );

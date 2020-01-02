@@ -12,26 +12,26 @@ RC workload::init() {
     return RCOK;
 }
 
-RC workload::init_schema(string schema_file) {
+RC workload::init_schema(std::istream &in) {
     assert(sizeof(uint64_t) == 8);
     assert(sizeof(double) == 8);
     string line;
-    ifstream fin(schema_file);
     Catalog * schema;
     uint32_t num_indexes = 0;
     uint32_t num_tables = 0;
-    while (getline(fin, line)) {
+
+    while (getline(in, line)) {
         if (line.compare(0, 6, "TABLE=") == 0) {
             string tname;
             tname = &line[6];
             schema = (Catalog *) _mm_malloc(sizeof(Catalog), 64);
-            getline(fin, line);
+            getline(in, line);
             int col_count = 0;
             // Read all fields for this table.
             vector<string> lines;
             while (line.length() > 1) {
                 lines.push_back(line);
-                getline(fin, line);
+                getline(in, line);
             }
             schema->init( tname.c_str(), lines.size() );
             for (uint32_t i = 0; i < lines.size(); i++) {
@@ -68,7 +68,7 @@ RC workload::init_schema(string schema_file) {
         } else if (!line.compare(0, 6, "INDEX=")) {
             string iname;
             iname = &line[6];
-            getline(fin, line);
+            getline(in, line);
 
             vector<string> items;
             string token;
@@ -102,7 +102,6 @@ RC workload::init_schema(string schema_file) {
             indexes.push_back(index);
         }
     }
-    fin.close();
     return RCOK;
 }
 

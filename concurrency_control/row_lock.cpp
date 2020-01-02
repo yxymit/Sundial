@@ -5,19 +5,16 @@
 #include "lock_manager.h"
 #include "f1_manager.h"
 
-#if CC_ALG == WAIT_DIE || CC_ALG == NO_WAIT || CC_ALG == F_ONE
+#if CC_ALG == WAIT_DIE || CC_ALG == NO_WAIT
 
-#if CC_ALG == WAIT_DIE || CC_ALG == F_ONE
+#if CC_ALG == WAIT_DIE
 bool
-Row_lock::CompareWait::operator() (const WaitEntry &en1, const WaitEntry &en2) const
+Row_lock::Compare::operator() (const LockEntry &en1, const LockEntry &en2) const
 {
+    // returns true if the first argument goes before the second argument
+    // begin(): txn with the smallest ts (oldest)
+    // end(): txn with the largest ts (youngest)
     return LOCK_MAN(en1.txn)->get_ts() < LOCK_MAN(en2.txn)->get_ts();
-}
-
-bool
-Row_lock::CompareLock::operator() (TxnManager * txn1, TxnManager * txn2) const
-{
-    return LOCK_MAN(txn1)->get_ts() < LOCK_MAN(txn2)->get_ts();
 }
 #endif
 
@@ -25,8 +22,8 @@ Row_lock::Row_lock()
 {
     _row = NULL;
     pthread_mutex_init(&_latch, NULL);
-    _lock_type = LOCK_NONE;
-      _max_num_waits = g_max_num_waits;
+    //_lock_type = LOCK_NONE;
+    _max_num_waits = g_max_num_waits;
     _upgrading_txn = NULL;
 }
 
@@ -51,214 +48,270 @@ Row_lock::unlatch()
 void
 Row_lock::init(row_t * row)
 {
+    exit(0);
     _row = row;
     pthread_mutex_init(&_latch, NULL);
     _lock_type = LOCK_NONE;
-      _max_num_waits = g_max_num_waits;
+    _max_num_waits = g_max_num_waits;
 }
 
 RC
 Row_lock::lock_get(LockType type, TxnManager * txn, bool need_latch)
 {
     RC rc = RCOK;
+    if (need_latch) latch();
 #if CC_ALG == NO_WAIT
-    if (conflict_lock(_lock_type, type)) {
-        if (type == _lock_type) {
-            INC_INT_STATS(num_aborts_ws, 1);
-        } else {
-            INC_INT_STATS(num_aborts_rs, 1);
+    LockEntry * entry = NULL;
+    for (std::set<LockEntry>::iterator it = _locking_set.begin(); it != _locking_set.end(); it ++)
+        if (it->txn == txn)
+            entry = (LockEntry *) &(*it);
+    if (entry) { // the txn is alreayd a lock owner
+        if (entry->type != type) {
+            assert(type == LOCK_EX && entry->type == LOCK_SH);
+            if (_locking_set.size() == 1)
+                entry->type = type;
+            else
+                rc = ABORT;
         }
-        return ABORT;
+    } else {
+        if (!_locking_set.empty() && conflict_lock(type, _locking_set.begin()->type))
+            rc = ABORT;
+        else
+            _locking_set.insert( LockEntry {type, txn} );
     }
-#endif
-    if (need_latch)
-        pthread_mutex_lock( &_latch );
-    if (_locking_set.find(txn) != _locking_set.end()) {
-        // upgrade request.
-        if (_lock_type != type) {
-            if (_lock_type == LOCK_SH) {
-                assert(type == LOCK_EX);
-                _upgrading_txn = txn;
-                if (_locking_set.size() == 1) {
-                    _lock_type = LOCK_EX;
-                    rc = RCOK;
-                } else {
-                    _lock_type = LOCK_UPGRADING;
+#else // CC_ALG == WAIT_DIE
+    /*LockEntry * entry = NULL;
+    for (std::set<LockEntry>::iterator it = _locking_set.begin();
+         it != _locking_set.end(); it ++) {
+        if (it->txn == txn)
+            entry = (Row_lock::LockEntry *)&(*it);
+    }
+    if (entry != NULL) { // This txn is already holding a lock.
+        if (entry->type == type) {} // the txn request the same lock type again, ignore
+        else {
+            // The transaction must be upgrading a SH-lock to EX-lock
+            assert(entry->type == LOCK_SH && type == LOCK_EX);
+            for (std::set<LockEntry>::iterator it = _locking_set.begin();
+                 it != _locking_set.end(); it ++) {
+                // If another transaction is already waiting for upgrade, must
+                // abort due to conflict.
+                if (it->type == LOCK_UPGRADING)
+                    rc = ABORT;
+            }
+            if (rc == RCOK) {
+                // If the transaction is the only lock owner, acquire LOCK_EX
+                if (_locking_set.size() == 1)
+                    entry->type = LOCK_EX;
+                else { // otherwise wait for other (SH) owners to release.
+                    entry->type = LOCK_UPGRADING;
                     rc = WAIT;
                 }
-            } else {
-                assert(_lock_type == LOCK_UPGRADING);
-                rc = ABORT;
             }
-        } // else just ignore.
-        if (need_latch)
-            pthread_mutex_unlock( &_latch );
-        return rc;
-    }
-    bool conflict = conflict_lock(_lock_type, type);
-#if CC_ALG == NO_WAIT
-    if (conflict) {
-        if (type == _lock_type) {
-            assert(type == LOCK_EX);
-            INC_INT_STATS(num_aborts_ws, 1);
+        }
+    } else { // This is a new transaction
+        if (_locking_set.empty() || (!conflict_lock(type, _locking_set.begin()->type)
+                                     && _waiting_set.empty())) {
+            // no conflict, directly acquire the lock
+            _locking_set.insert( LockEntry {type, txn} );
+            //if (_row && txn->get_txn_id() <= 5)
+            //    printf("txn %ld locks tuple %ld. type=%d\n",
+            //           txn->get_txn_id(), _row->get_primary_key(), _locking_set.begin()->type);
         } else {
-            INC_INT_STATS(num_aborts_rs, 1);
+            // if the txn conflicts with an older txn, abort
+            for (auto entry : _locking_set)
+                if (LOCK_MAN(entry.txn)->get_ts() < LOCK_MAN(txn)->get_ts())
+                    rc = ABORT;
+            for (auto entry : _waiting_set)
+                if (LOCK_MAN(entry.txn)->get_ts() < LOCK_MAN(txn)->get_ts()
+                    && conflict_lock(type, entry.type))
+                    rc = ABORT;
+            // Otherwise can wait
+            if (rc != ABORT) {
+                //if (_row && txn->get_txn_id() <= 5)
+                //    printf("--txn %ld waits for tuple %ld\n", txn->get_txn_id(), _row->get_primary_key());
+                _waiting_set.insert( LockEntry {type, txn} );
+                txn->_start_wait_time = get_sys_clock();
+                rc = WAIT;
+            } //else {
+                //if (_row && txn->get_txn_id() <= 5)
+                //    printf("--txn %ld (%ld) fails to lock/wait for tuple %ld\n",
+                //           txn->get_txn_id(), LOCK_MAN(txn)->get_ts(), _row->get_primary_key());
+            //}
         }
-        rc = ABORT;
-    }
-#elif CC_ALG == WAIT_DIE || CC_ALG == F_ONE
-    // check conflict between incoming txn and waiting txns.
-    if (!conflict)
-        if (!_waiting_set.empty() && LOCK_MAN(_waiting_set.rbegin()->txn)->get_ts() > LOCK_MAN(txn)->get_ts())
-            conflict = true;
-    if (conflict) {
-        assert(!_locking_set.empty());
-        if (_waiting_set.size() > _max_num_waits) {
-            rc = ABORT;
-            INC_INT_STATS(int_debug1, 1);
-        }
-        else if (LOCK_MAN(txn)->get_ts() > LOCK_MAN(*_locking_set.begin())->get_ts() ||
-            (!_waiting_set.empty() && LOCK_MAN(txn)->get_ts() > LOCK_MAN(_waiting_set.begin()->txn)->get_ts())) {
-            rc = ABORT;
-            INC_INT_STATS(int_debug2, 1);
-        } else {
-            rc = WAIT;
-            INC_INT_STATS(int_debug3, 1);
-        }
-    }
-    if (rc == WAIT) {
-        WaitEntry entry = {type, txn};
-        assert(!_locking_set.empty());
-        for (auto entry : _waiting_set)
-            assert(entry.txn != txn);
-        _waiting_set.insert(entry);
-        txn->_start_wait_time = get_sys_clock();
-    }
-    // ABORT Stats
-    if (rc == ABORT) {
-        if (type == _lock_type && type == LOCK_EX) {
-            INC_INT_STATS(num_aborts_ws, 1);
-        } else {
-            INC_INT_STATS(num_aborts_rs, 1);
-        }
-    }
+    }*/
 #endif
-    if (rc == RCOK) {
-        _lock_type = type;
-        uint32_t size = _locking_set.size();
-        _locking_set.insert(txn);
-        M_ASSERT(_locking_set.size() == size + 1, "locking_set.size=%ld, size=%d\n", _locking_set.size(), size);
-    }
-
-    if (need_latch)
-        pthread_mutex_unlock( &_latch );
+    if (need_latch) unlatch();
     return rc;
 }
-
 
 RC
 Row_lock::lock_release(TxnManager * txn, RC rc)
 {
-    pthread_mutex_lock( &_latch );
-
-    uint32_t released = _locking_set.erase(txn);
-#if CC_ALG == F_ONE
-    if (released != 1) {
-        // remove the txn from the _waiting_set
-        for (std::set<WaitEntry>::iterator it = _waiting_set.begin();
-            it != _waiting_set.end(); it ++)
-        {
-            if (it->txn == txn) {
-                _waiting_set.erase(it);
+    assert(rc == COMMIT || rc == ABORT);
+    latch();
+  #if CC_ALG == NO_WAIT
+    //printf("txn=%ld releases this=%ld\n", txn->get_txn_id(), (uint64_t)this);
+    LockEntry entry = {LOCK_NONE, NULL};
+    for (std::set<LockEntry>::iterator it = _locking_set.begin();
+         it != _locking_set.end(); it ++) {
+        if (it->txn == txn) {
+            entry = *it;
+            assert(entry.txn);
+            _locking_set.erase(it);
+            break;
+        }
+    }
+    #if CONTROLLED_LOCK_VIOLATION
+    // NOTE
+    // entry.txn can be NULL. This happens because Row_lock manager locates in
+    // each bucket of the hash index. Records with different keys may map to the
+    // same bucket and therefore share the manager. They will all call lock_release()
+    // during commit. Namely, one txn may call lock_release() multiple times on
+    // the same Row_lock manager. For now, we simply ignore calls except the
+    // first one.
+    if (rc == COMMIT && entry.txn) {
+        // DEBUG
+        /*if (!entry.txn) {
+            cout << "txn_id=" << txn->get_txn_id() << ", _row=" << (int64)_row << endl;
+            for (auto en : _locking_set)
+                cout << "en.txn_id=" << en.txn->get_txn_id() << ", en.type=" << en.type << endl;
+        }
+        assert(entry.txn);*/
+        _weak_locking_queue.push_back( LockEntry {entry.type, txn} );
+        for (auto en : _weak_locking_queue) {
+            if (en.txn == entry.txn)
+                break;
+            if ( conflict_lock(entry.type, en.type) ) {
+                // if the current txn has any pending dependency, incr_semaphore
+                txn->dependency_semaphore->incr();
                 break;
             }
         }
-        pthread_mutex_unlock( &_latch );
-        return RCOK;
     }
-#endif
-    if (released == 0) {
-        pthread_mutex_unlock( &_latch );
-        return RCOK;
-    }
+    #endif
 
-#if CC_ALG == F_ONE || CC_ALG == WAIT_DIE
-    assert(LOCK_MAN(txn)->get_ts() > 0);
-    bool done = (released == 1)? false : true;
-  #if CC_ALG == F_ONE
-    if (!done && rc == COMMIT && _lock_type == LOCK_EX) {
-        for ( set<WaitEntry>::iterator it = _waiting_set.begin();
-                it != _waiting_set.end(); it ++)
-        {
-            it->txn->set_txn_ready(ABORT);
-            // ABORT Stats
-            if (it->type == LOCK_EX) {
-                INC_INT_STATS(num_aborts_ws, 1);
-            } else {
-                INC_INT_STATS(num_aborts_rs, 1);
-            }
+  #else // CC_ALG == WAIT_DIE
+
+    /*LockEntry entry {LOCK_NONE, NULL};
+    // remove from locking set
+    for (std::set<LockEntry>::iterator it = _locking_set.begin();
+         it != _locking_set.end(); it ++)
+        if (it->txn == txn) {
+            entry = *it;
+            _locking_set.erase(it);
+            break;
         }
-        _waiting_set.clear();
-        done = true;
-    }
-  #endif
-    // handle upgrade
-    if (_lock_type == LOCK_UPGRADING) {
-        assert(_locking_set.size() >= 1);
-        if (_locking_set.size() == 1) {
-            TxnManager * t = *_locking_set.begin();
-            assert(t == _upgrading_txn);
-            _lock_type = LOCK_EX;
-            t->set_txn_ready(RCOK);
+
+    #if CONTROLLED_LOCK_VIOLATION
+    //if (_row && txn->get_txn_id() <= 5)
+    //    printf("entry.txn=%lx, type=%d\n", (uint64_t)entry.txn, entry.type);
+    if (rc == COMMIT) {
+        assert(entry.txn);
+        if (!_weak_locking_queue.empty())
+            assert(_weak_locking_queue.front().type == LOCK_EX);
+        if (!_weak_locking_queue.empty() || entry.type == LOCK_EX) {
+            _weak_locking_queue.push_back( LockEntry {entry.type, txn} );
+            // mark that the txn has one more unsolved dependency
+            LockManager * lock_manager = (LockManager *) txn->get_cc_manager();
+            lock_manager->increment_dependency();
+            //if (_row)
+            //    printf("txn %ld retires to weak queue. tuple=%ld\n", txn->get_txn_id(), _row->get_primary_key());
         }
-        pthread_mutex_unlock( &_latch );
-        return RCOK;
     }
-    if (_locking_set.empty())
-        _lock_type = LOCK_NONE;
+    #endif
+    // remove from waiting set
+    for (std::set<LockEntry>::iterator it = _waiting_set.begin();
+         it != _waiting_set.end(); it ++)
+        if (it->txn == txn) {
+            _waiting_set.erase(it);
+            break;
+        }
+
+    // try to upgrade LOCK_UPGRADING to LOCK_EX
+    if (_locking_set.size() == 1 && _locking_set.begin()->type == LOCK_UPGRADING) {
+        LockEntry * entry = (LockEntry *) &(*_locking_set.begin());
+        entry->type = LOCK_EX;
+        entry->txn->set_txn_ready(RCOK);
+    }
+    // try to move txns from waiting set to locking set
+    bool done = false;
     while (!done) {
-        std::set<WaitEntry>::reverse_iterator rit = _waiting_set.rbegin();
-        if (rit != _waiting_set.rend() && !conflict_lock(rit->type, _lock_type))
+        std::set<LockEntry>::reverse_iterator rit = _waiting_set.rbegin();
+        if (rit != _waiting_set.rend() &&
+            (_locking_set.empty()
+             || !conflict_lock(rit->type, _locking_set.begin()->type)))
         {
-            _lock_type = rit->type;
-            _locking_set.insert(rit->txn);
-
-            // for F_ONE, if the current txn commits a write, all waiting txns should abort.
+            _locking_set.insert( LockEntry {rit->type, rit->txn} );
+            //if (_row && txn->get_txn_id() <= 5)
+            //    printf("--txn %ld wakes up txn %ld\n", txn->get_txn_id(), rit->txn->get_txn_id());
             rit->txn->set_txn_ready(RCOK);
+            //_waiting_set.erase( rit );
             _waiting_set.erase( --rit.base() );
         } else
             done = true;
-    }
-    if (_locking_set.empty())
-        assert(_waiting_set.empty());
-#elif CC_ALG == NO_WAIT
-    if (_locking_set.empty())
-        _lock_type = LOCK_NONE;
-#else
-    assert(false);
-#endif
-    pthread_mutex_unlock( &_latch );
+    }*/
+  #endif
+    unlatch();
     return RCOK;
 }
 
+#if CONTROLLED_LOCK_VIOLATION
+// In the current CLV architecture, if a txn calls lock_cleanup(), it must be
+// the first txn in the _weak_locking_queue; we simply dequeue it.
+// However, the complication comes when some readonly txns depend on a
+// dequeueing txn. In this case, we need to check whether all the dependency
+// information of the readonly txn has been cleared and commit it if so.
+RC
+Row_lock::lock_cleanup(TxnManager * txn) //, std::set<TxnManager *> &ready_readonly_txns)
+{
+    latch();
+
+    //assert(!_weak_locking_queue.empty());
+    // Find the transaction in the _weak_locking_queue and remove it.
+    auto it = _weak_locking_queue.begin();
+    for (; it != _weak_locking_queue.end(); it ++) {
+        if (it->txn == txn)
+            break;
+    }
+    // txn does not exist in the _weak_locking_queue when two index nodes map to
+    // the same hash bucket. Only one entry is inserted into _weak_locking_queue.
+    // Cleanup for the second index node will miss.
+    if ( it != _weak_locking_queue.end() ) {
+        LockType type = it->type;
+        if (type == LOCK_EX) assert( it == _weak_locking_queue.begin() );
+        if (type == LOCK_SH)
+            for (auto it2 = _weak_locking_queue.begin(); it2 != it; it2 ++)
+                assert( it2->type == LOCK_SH);
+        _weak_locking_queue.erase( it );
+
+        // notify dependent transactions
+        // If the new leading lock is LOCK_EX, wake it up.
+        // Else if the removed txn has LOCK_EX, wake up leading txns with LOCK_SH
+        if (_weak_locking_queue.front().type == LOCK_EX)
+            _weak_locking_queue.front().txn->dependency_semaphore->decr();
+        else if (type == LOCK_EX) {
+            for (auto entry : _weak_locking_queue) {
+                if (entry.type == LOCK_SH)
+                    entry.txn->dependency_semaphore->decr();
+                else
+                    break;
+            }
+        }
+    }
+
+    unlatch();
+    return RCOK;
+}
+#endif
+
 bool Row_lock::conflict_lock(LockType l1, LockType l2)
 {
-    if (l1 == LOCK_UPGRADING || l2 == LOCK_UPGRADING)
+    if (l1 == LOCK_EX || l2 == LOCK_EX)
         return true;
-    if (l1 == LOCK_NONE || l2 == LOCK_NONE)
-        return false;
-    else if (l1 == LOCK_EX || l2 == LOCK_EX)
+    else if (l1 == LOCK_UPGRADING && l2 == LOCK_UPGRADING)
         return true;
     else
         return false;
-}
-
-bool
-Row_lock::is_owner(TxnManager * txn)
-{
-    return _lock_type == LOCK_EX
-        && _locking_set.size() == 1
-        && (*_locking_set.begin()) == txn;
 }
 
 #endif
