@@ -278,15 +278,6 @@ TxnManager::execute(bool restart)
         RC rc = _store_procedure->execute();
         INC_FLOAT_STATS(logic, get_sys_clock() - tt);
 
-        // Handle single-partition transactions
-        if (_store_procedure->is_single_partition()) {
-            assert(rc == RCOK || rc == ABORT);
-            if (rc == RCOK)
-                return process_commit_phase_singlepart(COMMIT);
-            else
-                return process_commit_phase_singlepart(ABORT);
-        }
-
         if (rc == RCOK) {
             if (_num_resp_expected == 0) {
                 assert(!_txn_abort);
