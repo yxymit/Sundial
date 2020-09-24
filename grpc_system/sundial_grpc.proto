@@ -1,0 +1,57 @@
+syntax = "proto3";
+package sundial_rpc;
+message SundialRequest {
+    enum RequestType {
+        READ_REQ = 0;
+        PREPARE_REQ = 1;
+        COMMIT_REQ = 2;
+        ABORT_REQ = 3;
+        SYS_REQ = 4;
+        NUM_REQ_TYPES = 5;
+    }
+    message ReadRequest {
+        uint64 key = 1;
+        uint64 index_id = 2;
+        uint64 access_type = 3;
+        // uint64 ts = 4;
+    }
+    message TupleData {
+        uint64 key = 1;
+        uint64 table_id = 2;
+        uint64 size = 3;
+        bytes data = 4;
+    }
+    uint64                  txn_id        = 1;
+    RequestType             request_type  = 2;
+    repeated ReadRequest    read_requests = 3;
+    repeated TupleData      tuple_data    = 4;
+}
+
+message SundialResponse {
+    enum ResponseType {
+        RESP_OK = 0;
+        RESP_ABORT = 1;
+        PREPARED_OK = 2;
+        PREPARED_OK_RO = 3;
+        PREPARED_ABORT = 4;
+        ACK = 5;
+        SYS_RESP = 6;
+        NUM_RESP_TYPES = 7;
+    }
+    message TupleData {
+        uint64 key = 1;
+        uint64 table_id = 2;
+        uint64 size = 3;
+        bytes data = 4;
+    }
+    uint64                  txn_id        = 1;
+    ResponseType            response_type = 2;
+    repeated TupleData      tuple_data    = 3;
+}
+
+service Sundial_GRPC_SYNC {
+    rpc contactRemote(SundialRequest) returns (SundialResponse) {}
+}
+service Sundial_GRPC_ASYNC {
+    rpc contactRemote(SundialRequest) returns (SundialResponse) {}
+}

@@ -1,0 +1,4 @@
+protoc -I ./grpc_system --grpc_out=./grpc_system --plugin=protoc-gen-grpc=`which grpc_cpp_plugin` ./grpc_system/sundial_grpc.proto
+protoc -I ./grpc_system --cpp_out=./grpc_system ./grpc_system/sundial_grpc.proto
+export LD_LIBRARY_PATH=/usr/local/lib
+export PKG_CONFIG_PATH=/local/grpc/cmake/build/libs/opt/pkgconfig
