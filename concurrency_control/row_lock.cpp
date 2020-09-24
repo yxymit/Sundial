@@ -15,6 +15,7 @@ Row_lock::Compare::operator() (const LockEntry &en1, const LockEntry &en2) const
     // begin(): txn with the smallest ts (oldest)
     // end(): txn with the largest ts (youngest)
     return LOCK_MAN(en1.txn)->get_ts() < LOCK_MAN(en2.txn)->get_ts();
+   //return true;
 }
 #endif
 
@@ -54,12 +55,70 @@ Row_lock::init(row_t * row)
     _lock_type = LOCK_NONE;
     _max_num_waits = g_max_num_waits;
 }
-
+#if CC_ALG == WAIT_DIE
+RC Row_lock:: wait_die_check(LockEntry* entry,LockType type,bool need_latch){
+    int flag=0;
+    if(_locking_set.size()==0){
+        return RCOK;
+    }
+    //check if existing lock has conflicts
+    //assert the locking set only contains some sh locks or 1 ex lock
+    if(conflict_lock(type, _locking_set.begin()->type)){
+     if(_locking_set.begin()->type==LOCK_EX){
+         //only one can grab the ex lock
+         assert(_locking_set.size()==1);
+     }
+     //check timestamp   
+    for (std::set<LockEntry>::iterator it = _locking_set.begin(); it != _locking_set.end(); it ++){
+        LockEntry * eit = NULL;
+        eit = (LockEntry *) &(*it);
+        //if current txn is younger than any lock holder
+        if(LOCK_MAN(entry->txn)->get_ts()>LOCK_MAN(eit->txn)->get_ts()){
+            return ABORT;
+        }
+    }
+    
+    //has conflict, but no need to abort, so can wait
+    pthread_cond_init(&(entry->cv),NULL);
+    if(!need_latch){
+        latch();
+    }
+    _waiting_set.insert(*entry);
+    printf("txn sleep\n");
+    pthread_cond_wait(&(entry->cv),&_latch);
+    printf("get out of wait\n");
+    if(!need_latch){
+        unlatch();
+    }
+    return RCOK;
+    }
+    //no conflict
+    else{
+        //a very special case, a "younger lock already waiting for ex  but another older txn comes in and grabs the shared lock"
+        if(type==LOCK_SH){
+            //if there is someone waiting and sh has no conflict, then it must be an ex
+            if(!_waiting_set.empty()){
+            for (std::set<LockEntry>::iterator it = _waiting_set.begin(); it != _waiting_set.end(); it ++){
+                LockEntry * eit = NULL;
+                eit = (LockEntry *) &(*it);
+                //assert the waiting one's type is ex
+                assert(eit->type==LOCK_EX);
+                if(LOCK_MAN(entry->txn)->get_ts()<LOCK_MAN(eit->txn)->get_ts())
+                    return ABORT;
+            }
+            }
+        }
+        //no special case, no conflict, can add to the locking set
+        return RCOK;
+    }
+}
+#endif
 RC
 Row_lock::lock_get(LockType type, TxnManager * txn, bool need_latch)
 {
-    RC rc = RCOK;
+   RC rc = RCOK;
     if (need_latch) latch();
+    //latch();
 #if CC_ALG == NO_WAIT
     LockEntry * entry = NULL;
     for (std::set<LockEntry>::iterator it = _locking_set.begin(); it != _locking_set.end(); it ++)
@@ -79,7 +138,36 @@ Row_lock::lock_get(LockType type, TxnManager * txn, bool need_latch)
         else
             _locking_set.insert( LockEntry {type, txn} );
     }
-#else // CC_ALG == WAIT_DIE
+#elif CC_ALG == WAIT_DIE
+    //check if txn already exists
+    LockEntry * entry = NULL;
+    for (std::set<LockEntry>::iterator it = _locking_set.begin(); it != _locking_set.end(); it ++)
+        if (it->txn == txn)
+            entry = (LockEntry *) &(*it);
+    if(entry){
+        if(entry->type!=type){
+            assert(type == LOCK_EX && entry->type == LOCK_SH);
+            //if current txn is the only txn holding a lock, just upgrade it
+            if (_locking_set.size() == 1)
+                entry->type = type;
+            else{//if there are other txns holding the lock
+                rc = wait_die_check(entry,type,need_latch);
+                //get out of wait or no wait at all
+                if(rc==RCOK){
+                    entry->type = type;
+                }
+            }    
+        }
+    }
+    else{//a new lock entry is needed, not exist
+    LockEntry entry1 = LockEntry {type, txn};
+    rc = wait_die_check(&entry1, type,need_latch);
+    if(rc==RCOK){
+        _locking_set.insert(entry1);
+    }
+    }
+
+
     /*LockEntry * entry = NULL;
     for (std::set<LockEntry>::iterator it = _locking_set.begin();
          it != _locking_set.end(); it ++) {
@@ -91,7 +179,7 @@ Row_lock::lock_get(LockType type, TxnManager * txn, bool need_latch)
         else {
             // The transaction must be upgrading a SH-lock to EX-lock
             assert(entry->type == LOCK_SH && type == LOCK_EX);
-            for (std::set<LockEntry>::iterator it = _locking_set.begin();
+            for (std::set<LockEntry>::iterator it = _locking_set.begin(); 
                  it != _locking_set.end(); it ++) {
                 // If another transaction is already waiting for upgrade, must
                 // abort due to conflict.
@@ -139,8 +227,18 @@ Row_lock::lock_get(LockType type, TxnManager * txn, bool need_latch)
             //}
         }
     }*/
+#else    
 #endif
     if (need_latch) unlatch();
+    //unlatch();
+   // printf("grab return\n");
+   if(rc==ABORT){
+       //printf("txn aborted\n");
+   }
+   else{
+    //printf("grab a lock\n");
+   }
+   
     return rc;
 }
 
@@ -190,7 +288,53 @@ Row_lock::lock_release(TxnManager * txn, RC rc)
     }
     #endif
 
-  #else // CC_ALG == WAIT_DIE
+  #elif CC_ALG == WAIT_DIE
+    LockEntry * entry = NULL;
+    // remove from locking set
+    for (std::set<LockEntry>::iterator it = _locking_set.begin();
+         it != _locking_set.end(); it ++){
+        if (it->txn == txn) {
+            //entry = *it;
+            _locking_set.erase(it);
+            break;
+        }
+        }
+    //if waiting set is not empty, we can check if we can wake it up
+    if(!_waiting_set.empty()){
+        //printf("try to wake up!!!\n");
+        //if locking set is empty or no conflict between waiting set's head and locking set's head
+        if(_locking_set.empty()||!conflict_lock(_waiting_set.begin()->type, _locking_set.begin()->type)){
+            //if waiting set's head is ex
+            if(_waiting_set.begin()->type==LOCK_EX){
+                std::set<LockEntry>::iterator it = _waiting_set.begin();
+                entry = (LockEntry *) &(*it);
+                
+
+                //wake 1 ex wait
+                printf("wake up an ex\n");
+                int a =pthread_cond_signal(&(entry->cv));
+                //printf("return is %d\n",a);
+                _waiting_set.erase(it);
+
+            }//all we can wake up multiple SH lock threads
+            else if(_waiting_set.begin()->type==LOCK_SH){
+                for (std::set<LockEntry>::iterator it = _waiting_set.begin();it != _waiting_set.end(); it ++){
+                    if(it->type==LOCK_SH){
+                        entry = (LockEntry *) &(*it);
+                        printf("wake up an sh\n");
+                        int o =pthread_cond_signal(&(entry->cv));
+                        //printf("return is %d\n",o);
+                        _waiting_set.erase(it);
+                    }
+                    else{
+                        break;
+                    }
+
+         }
+            }
+        }
+    }
+    
 
     /*LockEntry entry {LOCK_NONE, NULL};
     // remove from locking set
@@ -252,6 +396,7 @@ Row_lock::lock_release(TxnManager * txn, RC rc)
     }*/
   #endif
     unlatch();
+   // printf("release return\n");
     return RCOK;
 }
 

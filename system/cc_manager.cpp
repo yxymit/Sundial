@@ -59,6 +59,7 @@ CCManager::row_insert(table_t * table, row_t * row)
     return rc;
 }
 
+
 RC
 CCManager::row_delete(row_t * row)
 {
@@ -83,3 +84,10 @@ CCManager::commit_insdel()
     assert(false);
     return RCOK;
 }
+
+
+#if CC_ALG == WAIT_DIE
+uint64_t CCManager::get_ts(){
+    return _timestamp;
+}
+#endif

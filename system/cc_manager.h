@@ -21,7 +21,9 @@ public:
     virtual ~CCManager() {};
 
     virtual void      init();
-
+    #if CC_ALG == WAIT_DIE
+    uint64_t get_ts();
+    #endif
     // For algorithms other than TicToc, we don't care whether the txn is readonly or not.
     virtual bool      is_read_only() { return false; }
     virtual RC        register_remote_access(uint32_t remote_node_id, access_t type, uint64_t key,

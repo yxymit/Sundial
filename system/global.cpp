@@ -3,8 +3,12 @@
 #include "query.h"
 #include "txn_table.h"
 #include "log.h"
-#include "rpc_client.h"
-#include "rpc_server.h"
+//#include "rpc_client.h"
+//#include "rpc_server.h"
+#include "grpc_sync_client.h"
+#include "grpc_async_client.h"
+#include "grpc_sync_server.h"
+#include "grpc_async_server.h"
 
 Stats *             glob_stats;
 Manager *           glob_manager;
@@ -84,8 +88,13 @@ uint32_t        g_node_id;
 uint32_t        g_num_input_threads     = NUM_INPUT_THREADS;
 uint32_t        g_num_output_threads    = NUM_OUTPUT_THREADS;
 
-SundialRPCClient *  rpc_client;
-SundialRPCServerImpl * rpc_server;
+//SundialRPCClient *  rpc_client;
+//SundialRPCServerImpl * rpc_server;
+Sundial_Async_Client* grpc_async_client;
+SundialAsyncServiceImp* grpc_async_server;
+SundialServiceImp* grpc_sync_server;
+Sundial_Sync_Client* grpc_sync_client;
+
 
 Transport *     transport;
 InOutQueue **   input_queues;
@@ -100,5 +109,10 @@ FreeQueue *     free_queue_txn_man;
 uint32_t        g_dummy_size            = 0;
 
 string ifconfig_string =
-  "localhost:10000\n"
-  "localhost:10001";
+  "# a list of servers; each on a new line\n"
+"128.105.144.88\n"
+"128.105.144.84";
+
+
+string sync_port(":5104");
+string async_port(":5009"); 

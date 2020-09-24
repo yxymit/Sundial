@@ -3,6 +3,8 @@
 #include "stats.h"
 #include "manager.h"
 #include "txn.h"
+#include "sundial.pb.h"
+#include "sundial.grpc.pb.h"
 
 SundialRPCClient::SundialRPCClient() {
     _servers = new SundialRPC * [g_num_nodes];
@@ -31,7 +33,7 @@ SundialRPCClient::sendRequest(uint64_t node_id, SundialRequest &request, Sundial
     glob_stats->_stats[GET_THD_ID]->_req_msg_count[ request.request_type() ] ++;
     glob_stats->_stats[GET_THD_ID]->_req_msg_size[ request.request_type() ] += request.SpaceUsedLong();
     _servers[node_id]->contactRemote(&rpc, &request, &response, nullptr);
-    rpc.Wait();
+    /*rpc.Wait();*/
     assert( rpc::status::IsOk(rpc) );
 
     glob_stats->_stats[GET_THD_ID]->_resp_msg_count[ response.response_type() ] ++;

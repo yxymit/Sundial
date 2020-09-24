@@ -36,7 +36,7 @@ private:
     LogBufferEntry *    _log_buffer;
     uint32_t            _buffer_size;
     uint32_t            _num_shards;
-    int64               _curr_shard_id;
+    int64_t               _curr_shard_id;
 
     int64_t             _lsn;         // next lsn to allocate
     int64_t             _request_lsn;

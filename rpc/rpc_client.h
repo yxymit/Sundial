@@ -1,5 +1,6 @@
 #pragma once
-
+#include "sundial.pb.h"
+#include "sundial.grpc.pb.h"
 
 class TxnManager;
 

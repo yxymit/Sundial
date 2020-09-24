@@ -17,10 +17,15 @@
 #include "tpcc_store_procedure.h"
 #include "tpcc_query.h"
 #include "tpcc_helper.h"
-
+#include "grpc_async_server.h"
+#include "grpc_sync_server.h"
+#include "grpc_async_client.h"
+#include "grpc_sync_client.h"
 #include "tictoc_manager.h"
 #include "lock_manager.h"
 #include "f1_manager.h"
+#include "sundial_grpc.grpc.pb.h"
+#include "sundial_grpc.pb.h"
 #if CC_ALG == NO_WAIT || CC_ALG == WAIT_DIE
 #include "row_lock.h"
 #endif
@@ -135,7 +140,6 @@ TxnManager::restart() {
     _is_single_partition = true;
     _is_read_only = true;
     _is_remote_abort = false;
-
     _txn_restart_time = get_sys_clock();
     _store_procedure->init();
     for (auto kvp : _remote_nodes_involved)
@@ -157,13 +161,20 @@ TxnManager::start()
         _commit_start_time = get_sys_clock();
         rc = process_commit_phase_singlepart(rc);
     } else {
-        if (rc == ABORT)
-            rc = process_2pc_phase2(ABORT);
+        if (rc == ABORT){
+            CompletionQueue* cq = new CompletionQueue();
+            rc = process_2pc_phase2(ABORT,cq);
+            delete cq;
+            }
         else {
             _prepare_start_time = get_sys_clock();
-            process_2pc_phase1();
+            CompletionQueue* cq = new CompletionQueue();
+            process_2pc_phase1(cq);
+             delete cq;
             _commit_start_time = get_sys_clock();
-            rc = process_2pc_phase2(COMMIT);
+            CompletionQueue* cq2 = new CompletionQueue();
+            rc = process_2pc_phase2(COMMIT,cq2);
+            delete cq2;
         }
     }
     update_stats();
@@ -192,7 +203,8 @@ TxnManager::process_commit_phase_singlepart(RC rc)
     // slower than design A.
     if (rc == ABORT) {
         _cc_manager->cleanup(rc);
-        _txn_state = ABORTED;
+        _txn_state = ABORTED;// Spawn a new CallData instance to serve new clients.
+    
         rc = ABORT;
     } else { // rc == COMMIT
         char * log_record = NULL;
@@ -200,7 +212,7 @@ TxnManager::process_commit_phase_singlepart(RC rc)
         if (log_record_size > 0) {
             assert(log_record);
             log_semaphore->incr();
-            log_manager->log(this, log_record_size, log_record);
+            //log_manager->log(this, log_record_size, log_record);
             delete [] log_record;
             // The worker thread will be waken up by the logging thread after
             // the logging operation finishes.
@@ -222,7 +234,7 @@ TxnManager::process_commit_phase_singlepart(RC rc)
         // commit (CLV only).
         uint64_t tt = get_sys_clock();
 
-        log_semaphore->wait();
+        //log_semaphore->wait();
 
         _log_ready_time = get_sys_clock();
         INC_FLOAT_STATS(log_ready_time, get_sys_clock() - tt);
@@ -244,6 +256,7 @@ TxnManager::process_commit_phase_singlepart(RC rc)
 
 // For Distributed DBMS
 // ====================
+/*
 RC
 TxnManager::send_remote_read_request(uint64_t node_id, uint64_t key, uint64_t index_id,
                                      uint64_t table_id, access_t access_type)
@@ -280,19 +293,55 @@ TxnManager::send_remote_read_request(uint64_t node_id, uint64_t key, uint64_t in
         return ABORT;
     }
 }
+*/
+RC
+TxnManager::send_remote_read_request(uint64_t node_id, uint64_t key, uint64_t index_id,
+                                     uint64_t table_id, access_t access_type)
+{
+    _is_single_partition = false;
+    if ( _remote_nodes_involved.find(node_id) == _remote_nodes_involved.end() ) {
+        _remote_nodes_involved[node_id] = new RemoteNodeInfo;
+        _remote_nodes_involved[node_id]->state = RUNNING;
+    }
+    SundialRequest &request = _remote_nodes_involved[node_id]->request;
+    SundialResponse &response = _remote_nodes_involved[node_id]->response;
+    request.Clear();
+    response.Clear();
+    request.set_txn_id( get_txn_id() );
+    request.set_request_type( SundialRequest::READ_REQ );
+    SundialRequest::ReadRequest * read_request = request.add_read_requests();
+    read_request->set_key(key);
+    read_request->set_index_id(index_id);
+    read_request->set_access_type(access_type);
+    grpc_sync_client->contactRemote(node_id,request,&response);
+    //handle the response
+    assert(response.response_type() == SundialResponse::RESP_OK
+           || response.response_type() ==  SundialResponse::RESP_ABORT);
+    if (response.response_type() == SundialResponse::RESP_OK) {
+        ((LockManager *)_cc_manager)->process_remote_read_response(node_id, access_type, response);
+        return RCOK;
+    } else {
+        _remote_nodes_involved[node_id]->state = ABORTED;
+        _is_remote_abort = true;
+        return ABORT; 
+    }
+}
 
 RC
-TxnManager::process_2pc_phase1()
+TxnManager::process_2pc_phase1(CompletionQueue* cq)
 {
     // Start Two-Phase Commit
+    //printf("tnx 2pc p1\n");
     _txn_state = PREPARING;
 #if LOG_ENABLE
     char * log_record = NULL;
     uint32_t log_record_size = _cc_manager->get_log_record(log_record);
+    //printf("log_record_size is %d\n",log_record_size);
     if (log_record_size > 0) {
+        //printf("log record size>0\n");
         assert(log_record);
         log_semaphore->incr();
-        log_manager->log(this, log_record_size, log_record);
+        //log_manager->log(this, log_record_size, log_record);
         delete [] log_record;
     }
   #if CONTROLLED_LOCK_VIOLATION
@@ -308,19 +357,22 @@ TxnManager::process_2pc_phase1()
     for (auto it = _remote_nodes_involved.begin(); it != _remote_nodes_involved.end(); it ++) {
         assert(it->second->state == RUNNING);
         SundialRequest &request = it->second->request;
-        SundialResponse &response = it->second->response;
+        SundialResponse* response = &it->second->response;
         request.Clear();
-        response.Clear();
+        response->Clear();
         request.set_txn_id( get_txn_id() );
         request.set_request_type( SundialRequest::PREPARE_REQ );
 
         ((LockManager *)_cc_manager)->build_prepare_req( it->first, request );
 
 #if ASYNC_RPC
-        rpc_semaphore->incr();
-        rpc_client->sendRequestAsync(this, it->first, request, response);
+        //rpc_semaphore->incr();
+        //rpc_semaphore->print();
+        //changed to the sundial grpc async server
+        //rpc_client->sendRequestAsync(this, it->first,y request, response);
+        grpc::Status status=grpc_async_client->contactRemote(cq,this,it->first,request,&response);
 #else
-        rpc_client->sendRequest(it->first, request, response);
+        //rpc_client->sendRequest(it->first, request, response);
         // TODO. for now, assume prepare always succeeds
         assert (response.response_type() == SundialResponse::PREPARED_OK
                 || response.response_type() == SundialResponse::PREPARED_OK_RO);
@@ -333,12 +385,20 @@ TxnManager::process_2pc_phase1()
             _remote_nodes_involved[it->first]->state = COMMITTED;
 #endif
     }
-    log_semaphore->wait();
+   // printf("finish sending out all async request\n");
+    //log_semaphore->wait();
+    //printf("reach after log wait\n");
 #if ASYNC_RPC
-    rpc_semaphore->wait();
+    //printf("reach before rpc wait\n");
+    //rpc_semaphore->wait();
+     //printf("reach after rpc wait\n");
     for (auto it = _remote_nodes_involved.begin(); it != _remote_nodes_involved.end(); it ++) {
+        //modification here, extra statements
         assert(it->second->state == RUNNING);
         SundialResponse &response = it->second->response;
+        //printf("try to get response\n");
+        grpc_async_client->contactRemoteDone(cq,this,it->first,&response,1);
+        //printf("gets response\n");
         assert (response.response_type() == SundialResponse::PREPARED_OK
                 || response.response_type() == SundialResponse::PREPARED_OK_RO);
         if (! (response.response_type() == SundialResponse::PREPARED_OK
@@ -354,7 +414,7 @@ TxnManager::process_2pc_phase1()
 }
 
 RC
-TxnManager::process_2pc_phase2(RC rc)
+TxnManager::process_2pc_phase2(RC rc, CompletionQueue* cq)
 {
     assert(rc == COMMIT || rc == ABORT);
     _txn_state = (rc == COMMIT)? COMMITTING : ABORTING;
@@ -365,28 +425,30 @@ TxnManager::process_2pc_phase2(RC rc)
     char * log_record = (char *)record.c_str();
     uint32_t log_record_size = record.length();
     log_semaphore->incr();
-    log_manager->log(this, log_record_size, log_record);
+    //log_manager->log(this, log_record_size, log_record);
     // OPTIMIZATION: perform local logging and commit request in parallel
     // log_semaphore->wait();
+    int count=0;
   #endif
     for (auto it = _remote_nodes_involved.begin(); it != _remote_nodes_involved.end(); it ++) {
         // No need to run this phase if the remote sub-txn has already committed
         // or aborted.
         if (it->second->state == ABORTED || it->second->state == COMMITTED) continue;
-
+        count++;
         SundialRequest &request = it->second->request;
-        SundialResponse &response = it->second->response;
+        SundialResponse* response = &it->second->response;
         request.Clear();
-        response.Clear();
+        response->Clear();
         request.set_txn_id( get_txn_id() );
         SundialRequest::RequestType type = (rc == COMMIT)?
             SundialRequest::COMMIT_REQ : SundialRequest::ABORT_REQ;
         request.set_request_type( type );
 #if ASYNC_RPC
-        rpc_semaphore->incr();
-        rpc_client->sendRequestAsync(this, it->first, request, response);
+        //rpc_semaphore->incr();
+        //rpc_client->sendRequestAsync(this, it->first, request, response);
+        grpc_async_client->contactRemote(cq,this,it->first,request,&response);
 #else
-        rpc_client->sendRequest(it->first, request, response);
+       // rpc_client->sendRequest(it->first, request, response);
         assert (response.response_type() == SundialResponse::ACK);
         _remote_nodes_involved[it->first]->state = (rc == COMMIT)? COMMITTED : ABORTED;
 #endif
@@ -395,14 +457,16 @@ TxnManager::process_2pc_phase2(RC rc)
     // No need to wait for this log since it is optional (shared log optimization)
     dependency_semaphore->wait();
     _cc_manager->cleanup(rc);
-    log_semaphore->wait();
+    //log_semaphore->wait();
 #if ASYNC_RPC
-    rpc_semaphore->wait();
+    //rpc_semaphore->wait();
+    grpc_async_client->contactRemoteDone(cq,this,1,NULL,count);
     for (auto it = _remote_nodes_involved.begin(); it != _remote_nodes_involved.end(); it ++) {
         if (it->second->state == ABORTED || it->second->state == COMMITTED) continue;
         __attribute__((unused)) SundialResponse &response = it->second->response;
         assert (response.response_type() == SundialResponse::ACK);
-        it->second->state = (rc == COMMIT)? COMMITTED : ABORTED;
+        it->second->state = 
+(rc == COMMIT)? COMMITTED : ABORTED;
     }
 #endif
     _txn_state = (rc == COMMIT)? COMMITTED : ABORTED;
@@ -456,8 +520,11 @@ TxnManager::process_remote_request(const SundialRequest* request, SundialRespons
                 _cc_manager->cleanup(ABORT);
             } else
                 response->set_response_type( SundialResponse::RESP_OK );
+            //printf("finish precess remote read\n");    
             return rc;
+
         case SundialRequest::PREPARE_REQ :
+            //printf("get prepare request\n");
             // copy data to the write set.
             num_tuples = request->tuple_data_size();
             for (int i = 0; i < num_tuples; i++) {
@@ -466,29 +533,36 @@ TxnManager::process_remote_request(const SundialRequest* request, SundialRespons
                 char * data = get_cc_manager()->get_data(key, table_id);
                 memcpy(data, request->tuple_data(i).data().c_str(), request->tuple_data(i).size());
             }
+           // printf("finish copying data\n");
   #if LOG_ENABLE
             log_record_size = _cc_manager->get_log_record(log_record);
             if (log_record_size > 0) {
+              //  printf("log in remote record size>0\n");
                 assert(log_record);
                 log_semaphore->incr();
-                log_manager->log(this, log_record_size, log_record);
+                //log_manager->log(this, log_record_size, log_record);
                 delete [] log_record;
             }
+
     #if CONTROLLED_LOCK_VIOLATION
             _cc_manager->process_precommit_phase_coord();
     #endif
-            log_semaphore->wait();
+            //printf("reach before wait\n");
+            //log_semaphore->wait();
+            //printf("reach after wait\n");
   #endif
             response->set_response_type( SundialResponse::PREPARED_OK );
+            //printf("gets prepared phase ok\n");
             return rc;
         case SundialRequest::COMMIT_REQ :
         case SundialRequest::ABORT_REQ :
+            //printf("get commit/abort request\n");
   #if LOG_ENABLE
             record = std::to_string(_txn_id);
             log_record = (char *)record.c_str();
             log_record_size = record.length();
             log_semaphore->incr();
-            log_manager->log(this, log_record_size, log_record);
+            //log_manager->log(this, log_record_size, log_record);
   #endif
             dependency_semaphore->wait();
             rc = (request->request_type() == SundialRequest::COMMIT_REQ)? COMMIT : ABORT;
@@ -497,7 +571,7 @@ TxnManager::process_remote_request(const SundialRequest* request, SundialRespons
             // OPTIMIZATION: release locks as early as possible.
             // No need to wait for this log since it is optional (shared log
             // optimization)
-            log_semaphore->wait();
+            //log_semaphore->wait();
             response->set_response_type( SundialResponse::ACK );
             return rc;
         default:

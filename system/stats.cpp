@@ -4,7 +4,7 @@
 #include "tpcc_helper.h"
 #include "tpcc_const.h"
 
-#include "rpc_client.h"
+//#include "rpc_client.h"
 
 using std::setw;
 using std::left;

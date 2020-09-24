@@ -1,3 +1,4 @@
+syntax = "proto3";
 message SundialRequest {
     enum RequestType {
         READ_REQ = 0;
