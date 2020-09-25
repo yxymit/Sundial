@@ -86,6 +86,8 @@ void parser(int argc, char * argv[]) {
                 g_max_clock_skew = atoi( &argv[i][3] );
             else if (argv[i][2] == 'T')
                 g_run_time = atof( &argv[i][3] );
+            else if (argv[i][2] == 'N')
+                g_node_id= atoi( &argv[i][3] );    
             else
                 exit(0);
         } else if (argv[i][1] == 'Y') {

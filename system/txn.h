@@ -4,9 +4,11 @@
 #include "helper.h"
 
 //#include "rpc_server.h"
-#include "rpc_client.h"
+//#include "rpc_client.h"
 #include "semaphore_sync.h"
-
+#include "sundial_grpc.grpc.pb.h"
+#include "sundial_grpc.pb.h"
+//#include "worker_thread.h"
 class workload;
 //class WorkerThread;
 class row_t;
@@ -16,7 +18,7 @@ class SubQuery;
 class Message;
 class StoreProcedure;
 class CCManager;
-
+using grpc::CompletionQueue;
 class TxnManager
 {
 public:
@@ -65,8 +67,8 @@ public:
     void set_sub_txn(bool is_sub_txn)     { _is_sub_txn = is_sub_txn; }
     bool is_sub_txn()                     { return _is_sub_txn; }
 private:
-    RC process_2pc_phase1();
-    RC process_2pc_phase2(RC rc);
+    RC process_2pc_phase1(CompletionQueue* cq);
+    RC process_2pc_phase2(RC rc, CompletionQueue* cq);
 
 public:
     // Stats

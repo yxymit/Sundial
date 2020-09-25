@@ -23,6 +23,7 @@ public:
     virtual void    init(row_t * row);
     RC              lock_get(LockType type, TxnManager * txn, bool need_latch = true);
     RC              lock_release(TxnManager * txn, RC rc);
+    
 #if CONTROLLED_LOCK_VIOLATION
     RC              lock_cleanup(TxnManager * txn); //, std::set<TxnManager *> &ready_readonly_txns);
 #endif
@@ -36,7 +37,10 @@ protected:
     struct LockEntry {
         LockType type;
         TxnManager * txn;
+        //pthread_mutex_t mutex;
+        pthread_cond_t cv;
     };
+    RC              wait_die_check(LockEntry* entry,LockType type, bool need_latch);
     #define LOCK_MAN(txn) ((LockManager *) (txn)->get_cc_manager())
     // only store timestamp which uniquely identifies a txn.
     // for NO_WAIT, store the txn_id

@@ -5,9 +5,9 @@
 #if LOG_ENABLE
 
 //#define BOOST_NO_EXCEPTIONS
-void boost::throw_exception(std::exception const & e){
+/*void boost::throw_exception(std::exception const & e){
     //do nothing
-}
+}*/
 
 LogManager::LogManager()
 {
@@ -45,7 +45,7 @@ LogManager::log(TxnManager * txn, uint32_t size, char * record)
     // threads.
     //assert (_commit_lsn + _buffer_size - _lsn > g_max_num_active_txns * 2);
 
-    int64 curr_lsn = ATOM_FETCH_ADD(_lsn, 1);
+    int64_t  curr_lsn = ATOM_FETCH_ADD(_lsn, 1);
     assert(curr_lsn < _commit_lsn + _buffer_size);
 
     // Write to _log_buffer.
@@ -94,7 +94,7 @@ LogManager::run()
             uint64_t t1 = get_sys_clock();
             _last_logging_time = curr_time;
             _request_lsn += _curr_records;
-            _log_metadata.push(metadata);
+           // _log_metadata.push(metadata);
             _curr_records = 0;
             INC_FLOAT_STATS(logging_send_time, get_sys_clock() - t1);
         }
@@ -105,10 +105,12 @@ LogManager::run()
 bool
 LogManager::check_response() {
     if (!_log_metadata.empty()) {
+        printf("meta data not empty\n");
         LogMetadata &metadata = _log_metadata.front();
             uint64_t t1 = get_sys_clock();
             // commit this transaction
             for (int i = 0; i < metadata.num_records; i++) {
+                printf("free 1 txn\n");
                 LogBufferEntry &entry = _log_buffer[(metadata.lsn + i) % _buffer_size];
                 entry.txn->log_semaphore->decr();
                 entry.txn = NULL;
@@ -119,7 +121,7 @@ LogManager::check_response() {
             INC_FLOAT_STATS(logging_commit_time, get_sys_clock() - t1);
             return true;
         }
-    }
+    
     return false;
 }
 

@@ -252,6 +252,7 @@ LockManager::cleanup(RC rc)
 {
     assert(rc == COMMIT || rc == ABORT);
     if (rc == ABORT) {
+        //printf("abort clean up\n");
         for (auto access : _access_set)
             access.row->manager->lock_release(_txn, rc);
         for (auto access : _index_access_set)

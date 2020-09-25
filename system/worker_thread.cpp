@@ -107,6 +107,7 @@ RC WorkerThread::run() {
             assert( _native_txn->get_txn_state() == TxnManager::ABORTED);
             uint64_t sleep_time = g_abort_penalty * glob_manager->rand_double(); // in nanoseconds
             usleep(sleep_time / 1000);
+           // printf("after sleep\n");
         }
     }
     glob_manager->worker_thread_done();

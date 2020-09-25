@@ -3,6 +3,8 @@
 #include "txn.h"
 #include "txn_table.h"
 #include "manager.h"
+#include "sundial.pb.h"
+#include "sundial.grpc.pb.h"
 
 void
 SundialRPCServerImpl::run() {

@@ -12,10 +12,10 @@ GRPC_CPP_PLUGIN_PATH ?= `which $(GRPC_CPP_PLUGIN)`
 #CFLAGS=-Wall -g -std=c++0x
 CFLAGS=-Wall -g -std=c++11
 INCLUDE = -I. -I./benchmarks -I./concurrency_control -I./storage -I./system -I./grpc -I./grpc_system -I./utils
-CFLAGS += $(INCLUDE) -D NOGRAPHITE=1 -O0
+CFLAGS += $(INCLUDE) -D NOGRAPHITE=1 -O3
 #OTHERLAGS = `pkg-config --cflags protobuf grpc`
 
-LDFLAGS = -Wall -L. -L./libs -pthread -g -lrt -std=c++0x -O0 -ljemalloc
+LDFLAGS = -Wall -L. -L./libs -pthread -g -lrt -std=c++0x -O3 -ljemalloc
 LDFLAGS += -L/usr/local/lib `pkg-config --libs protobuf grpc++`\
            -Wl,--no-as-needed -lgrpc++_reflection -Wl,--as-needed\
            -ldl
